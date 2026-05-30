@@ -1,0 +1,24 @@
+# Server dependencies
+fastapi
+uvicorn
+python-multipart
+Pillow
+numpy
+
+# Deep learning
+torch
+torchvision
+timm
+
+# Training extras
+albumentations
+scikit-learn
+matplotlib
+seaborn
+pandas
+
+# Grad-CAM visualization (optional but recommended)
+grad-cam
+
+# Kaggle download (optional — only if using --kaggle flag)
+# kagglehub
