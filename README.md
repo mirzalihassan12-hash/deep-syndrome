@@ -17,17 +17,36 @@ Ensemble of **ResNet-50 + EfficientNet-B3 + ViT-S/16** for Down Syndrome detecti
 
 ```
 deep-syndrome/
-├── app.py                   # Entry point — starts the server
-├── main.py                  # FastAPI app + model loading + API routes
-├── train.py                 # Local model training script  ← train here
+├── app.py                    # Entry point — starts the server
+├── main.py                   # FastAPI app + model loading + API routes
+│
+├── train.py                  # Train ALL 3 models in one go
+├── train_resnet50.py         # Train ResNet-50 only
+├── train_efficientnet.py     # Train EfficientNet-B3 only
+├── train_vit.py              # Train ViT-S/16 only
+│
+├── training/                 # Shared training utilities
+│   ├── dataset.py            # Dataset class, transforms, dataloaders
+│   ├── engine.py             # Train loop, early stopping, evaluation
+│   └── plots.py              # Training curves, ROC, Grad-CAM
+│
+├── data/
+│   └── Down Syndrome Dataset/
+│       ├── downSyndrome/     # Down Syndrome images
+│       └── healthy/          # Control images
+│
 ├── static/
-│   └── index.html           # Web UI (served at http://localhost:7860)
-├── requirements.txt         # Server dependencies
-├── requirements_train.txt   # Training dependencies (includes ML extras)
-├── ResNet50_best.pth        # Trained ResNet-50 weights
-├── EfficientNet_B3_best.pth # Trained EfficientNet-B3 weights
-├── ViT_S16_best.pth         # Trained ViT-S/16 weights
-└── results/                 # Created after training — plots & metrics
+│   └── index.html            # Web UI (served at http://localhost:7860)
+│
+├── requirements.txt          # Server dependencies
+├── requirements_train.txt    # Training dependencies
+├── ResNet50_best.pth         # Trained ResNet-50 weights
+├── EfficientNet_B3_best.pth  # Trained EfficientNet-B3 weights
+├── ViT_S16_best.pth          # Trained ViT-S/16 weights
+└── results/                  # Auto-created after training
+    ├── resnet50/             # ResNet-50 curves, confusion matrix, Grad-CAM
+    ├── efficientnet/         # EfficientNet-B3 plots
+    └── vit/                  # ViT-S/16 plots
 ```
 
 ---
@@ -91,44 +110,55 @@ The script auto-explores all subfolders recursively and splits 70% train / 15% v
 
 ### Step 3 — Run training
 
-**Option A — Folder picker dialog (easiest)**
+Dataset is already included in `data/Down Syndrome Dataset/`.
+
+**Train all 3 models at once (recommended)**
+```bash
+python train.py --data-dir "data/Down Syndrome Dataset"
+```
+
+**Or train each model separately**
+```bash
+python train_resnet50.py    --data-dir "data/Down Syndrome Dataset"
+python train_efficientnet.py --data-dir "data/Down Syndrome Dataset"
+python train_vit.py         --data-dir "data/Down Syndrome Dataset"
+```
+
+**Folder picker dialog (no args needed)**
 ```bash
 python train.py
 ```
-A folder selection window opens. Pick your dataset root folder.
+A window opens — select the `data/Down Syndrome Dataset` folder.
 
-**Option B — Pass path directly**
-```bash
-python train.py --data-dir "C:/path/to/your/dataset"
-```
+### Step 4 — Per-model improvements
 
-**Option C — Download from Kaggle**
-```bash
-pip install kagglehub
-python train.py --kaggle
-```
-Requires a Kaggle account and API key (`~/.kaggle/kaggle.json`).
+| Model | Key improvement | Default LR | Default Epochs |
+|---|---|---|---|
+| ResNet-50 | Label smoothing (0.1) + GridDistortion aug | `1e-4` | 20 |
+| EfficientNet-B3 | CLAHE + GaussianBlur augmentation | `1e-4` | 20 |
+| ViT-S/16 | Linear warmup (5ep) + CosineAnnealingLR | `5e-5` | 25 |
 
-### Step 4 — Custom training options
+All models share: early stopping (patience 7-8), AMP on GPU, CosineAnnealingLR.
+
+### Step 5 — Custom options (same flags for all scripts)
 
 | Flag | Default | Description |
 |---|---|---|
 | `--data-dir` | (dialog) | Path to dataset root folder |
 | `--output-dir` | project root | Where to save `.pth` files |
-| `--epochs` | `20` | Number of training epochs |
+| `--epochs` | model-specific | Training epochs |
 | `--batch-size` | `32` | Batch size |
-| `--lr` | `1e-4` | Learning rate |
+| `--lr` | model-specific | Learning rate |
 | `--no-gradcam` | off | Skip Grad-CAM visualization |
 | `--workers` | `0` | DataLoader workers (keep 0 on Windows) |
-| `--kaggle` | off | Auto-download from Kaggle |
 
 **Examples:**
 ```bash
-# Fast test run
-python train.py --data-dir "C:/data/ds_dataset" --epochs 5 --batch-size 16
+# Quick test
+python train_resnet50.py --data-dir "data/Down Syndrome Dataset" --epochs 5
 
-# Full training run
-python train.py --data-dir "C:/data/ds_dataset" --epochs 30
+# ViT with custom LR
+python train_vit.py --data-dir "data/Down Syndrome Dataset" --epochs 30 --lr 3e-5
 ```
 
 ### Step 5 — Restart the server to load new weights
