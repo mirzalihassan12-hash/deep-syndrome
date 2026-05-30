@@ -57,5 +57,7 @@ desktop.ini
 # Data / cache
 .cache/
 *.cache
-data/
 datasets/
+
+# Processed split (auto-generated during training)
+_dataset_split/
