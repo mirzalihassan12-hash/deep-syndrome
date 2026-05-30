@@ -19,6 +19,3 @@ pandas
 
 # Grad-CAM visualization (optional but recommended)
 grad-cam
-
-# Kaggle download (optional — only if using --kaggle flag)
-# kagglehub

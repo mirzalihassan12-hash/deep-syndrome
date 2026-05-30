@@ -11,10 +11,7 @@ Usage
   python train.py
 
   # Option 2: pass path directly
-  python train.py --data-dir "C:/path/to/your/dataset"
-
-  # Option 3: download from Kaggle then train
-  python train.py --kaggle
+  python train.py --data-dir "data/Down Syndrome Dataset"
 
   # Custom epochs / batch size
   python train.py --data-dir "..." --epochs 30 --batch-size 16
@@ -41,8 +38,6 @@ def parse_args():
     p.add_argument("--batch-size",  type=int,  default=32)
     p.add_argument("--lr",          type=float, default=1e-4)
     p.add_argument("--seed",        type=int,  default=42)
-    p.add_argument("--kaggle",      action="store_true",
-                   help="Download dataset from Kaggle (needs kagglehub installed + API key)")
     p.add_argument("--no-gradcam",  action="store_true",
                    help="Skip Grad-CAM visualization")
     p.add_argument("--workers",     type=int,  default=0,
@@ -63,23 +58,6 @@ def pick_folder_dialog(title="Select your dataset folder"):
         return folder if folder else None
     except Exception:
         return None
-
-
-# ── Kaggle download ───────────────────────────────────────────────────────────
-def download_from_kaggle():
-    try:
-        import kagglehub
-        print("[INFO] Downloading dataset from Kaggle...")
-        path = kagglehub.dataset_download("mamunhasan2cs/down-syndrome-dataset")
-        print(f"[OK]   Dataset downloaded to: {path}")
-        return path
-    except ImportError:
-        print("[ERROR] kagglehub not installed. Run: pip install kagglehub")
-        sys.exit(1)
-    except Exception as e:
-        print(f"[ERROR] Kaggle download failed: {e}")
-        print("        Make sure your Kaggle API key is set up.")
-        sys.exit(1)
 
 
 # ── Dataset exploration & split ───────────────────────────────────────────────
@@ -452,16 +430,14 @@ def main():
 
     # ── 1. Get raw dataset path ───────────────────────────────────────────────
     raw_data_dir = None
-    if args.kaggle:
-        raw_data_dir = download_from_kaggle()
-    elif args.data_dir:
+    if args.data_dir:
         raw_data_dir = args.data_dir
     else:
         print("[INFO] No --data-dir provided. Opening folder picker...")
         raw_data_dir = pick_folder_dialog("Select your dataset root folder")
         if not raw_data_dir:
             print("[ERROR] No folder selected. Exiting.")
-            print("        Run:  python train.py --data-dir 'C:/path/to/dataset'")
+            print("        Run:  python train.py --data-dir 'data/Down Syndrome Dataset'")
             sys.exit(1)
 
     if not os.path.isdir(raw_data_dir):
