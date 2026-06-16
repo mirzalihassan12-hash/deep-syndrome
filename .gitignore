@@ -61,3 +61,6 @@ datasets/
 
 # Processed split (auto-generated during training)
 _dataset_split/
+
+# Docs
+docs/
