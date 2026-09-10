@@ -37,19 +37,82 @@ def find_class_folders(base):
     return ds_folders, ctrl_folders
 
 
+# ── Near-duplicate grouping (prevents train/val/test leakage) ────────────────
+def _ahash(path, hash_size=8):
+    """8x8 average-hash — cheap perceptual fingerprint, no numpy needed."""
+    img = Image.open(path).convert("L").resize((hash_size, hash_size), Image.LANCZOS)
+    pixels = list(img.getdata())
+    avg = sum(pixels) / len(pixels)
+    bits = 0
+    for p in pixels:
+        bits = (bits << 1) | (1 if p >= avg else 0)
+    return bits
+
+
+def _hamming(a, b):
+    return bin(a ^ b).count("1")
+
+
+def _group_near_duplicates(paths, threshold=0):
+    """
+    Cluster near-identical images (e.g. re-saved/re-compressed copies) so they
+    always land together in one split. threshold=0 (exact aHash match) is
+    intentionally strict: a looser threshold starts clustering images that
+    merely share similar lighting/composition rather than being duplicates.
+    """
+    hashes = [_ahash(p) for p in paths]
+    n = len(paths)
+    parent = list(range(n))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(x, y):
+        rx, ry = find(x), find(y)
+        if rx != ry:
+            parent[rx] = ry
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            if _hamming(hashes[i], hashes[j]) <= threshold:
+                union(i, j)
+
+    groups = {}
+    for i in range(n):
+        groups.setdefault(find(i), []).append(paths[i])
+    return list(groups.values())
+
+
 # ── 70 / 15 / 15 split ───────────────────────────────────────────────────────
 def split_and_copy(folders, class_name, dest_root, seed):
     all_imgs = [os.path.join(f, img) for f, imgs in folders for img in imgs]
+
+    # Group near-duplicates first so a duplicate cluster never straddles splits.
+    groups = _group_near_duplicates(all_imgs)
     random.seed(seed)
-    random.shuffle(all_imgs)
+    random.shuffle(groups)
+
     n    = len(all_imgs)
     n_tr = int(n * 0.70)
     n_vl = int(n * 0.15)
-    splits = {
-        "train": all_imgs[:n_tr],
-        "val":   all_imgs[n_tr : n_tr + n_vl],
-        "test":  all_imgs[n_tr + n_vl :],
-    }
+
+    splits = {"train": [], "val": [], "test": []}
+    for group in groups:
+        if len(splits["train"]) < n_tr:
+            splits["train"].extend(group)
+        elif len(splits["val"]) < n_vl:
+            splits["val"].extend(group)
+        else:
+            splits["test"].extend(group)
+
+    multi = [g for g in groups if len(g) > 1]
+    if multi:
+        print(f"   [dedup] {class_name}: {len(multi)} near-duplicate group(s) "
+              f"kept together (sizes: {sorted((len(g) for g in multi), reverse=True)})")
+
     for split, imgs in splits.items():
         dest = Path(dest_root) / split / class_name
         dest.mkdir(parents=True, exist_ok=True)
