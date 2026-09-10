@@ -1,0 +1,2 @@
+model,acc,prec,rec,f1,auc
+ResNet-50,0.9512,0.9356,0.9689,0.952,0.9916
