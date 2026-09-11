@@ -7,7 +7,7 @@ Deploy on: HuggingFace Spaces (FREE)
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 import torch
 import torch.nn as nn
 import torchvision.models as models
@@ -133,6 +133,21 @@ def ensemble_predict(tensor: torch.Tensor):
 @app.get("/")
 def root():
     return FileResponse("static/index.html")
+
+
+# ── PWA files — served from root scope so the service worker can control "/" ──
+@app.get("/manifest.json")
+def manifest():
+    return FileResponse("static/manifest.json", media_type="application/manifest+json")
+
+
+@app.get("/sw.js")
+def service_worker():
+    return Response(
+        content=open("static/sw.js").read(),
+        media_type="application/javascript",
+        headers={"Service-Worker-Allowed": "/"},
+    )
 
 
 @app.get("/api")

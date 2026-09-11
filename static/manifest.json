@@ -1,0 +1,16 @@
+{
+  "name": "DeepSyndrome — AI Diagnostic System",
+  "short_name": "DeepSyndrome",
+  "description": "Ensemble of ResNet-50, EfficientNet-B3 and ViT-S/16 for Down Syndrome screening from facial imagery.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0a0e1a",
+  "theme_color": "#0a0e1a",
+  "icons": [
+    { "src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/static/icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
