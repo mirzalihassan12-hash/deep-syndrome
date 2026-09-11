@@ -1,0 +1,2 @@
+model,acc,prec,rec,f1,auc
+EfficientNet-B3,0.9135,0.9266,0.8978,0.912,0.9785
