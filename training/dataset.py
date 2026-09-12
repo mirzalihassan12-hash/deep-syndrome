@@ -5,6 +5,7 @@ import os
 import sys
 import shutil
 import random
+import inspect
 from pathlib import Path
 
 import numpy as np
@@ -171,11 +172,20 @@ class DownSyndromeDataset(Dataset):
 
 # ── Transforms ────────────────────────────────────────────────────────────────
 def _coarse_dropout(**kwargs):
-    """Handle albumentations API changes across versions."""
-    try:
+    """
+    Handle albumentations API changes across versions. Newer versions (2.x)
+    silently warn and ignore unknown kwargs instead of raising TypeError, so
+    a try/except can't detect a mismatch here — inspect the actual signature.
+    """
+    params = inspect.signature(A.CoarseDropout.__init__).parameters
+    if "num_holes_range" in params:
+        return A.CoarseDropout(
+            num_holes_range=(1, 8), hole_height_range=(0.03, 0.07),
+            hole_width_range=(0.03, 0.07), **kwargs,
+        )
+    if "max_holes" in params:
         return A.CoarseDropout(max_holes=8, max_height=16, max_width=16, **kwargs)
-    except TypeError:
-        return A.CoarseDropout(num_holes_x=8, hole_height_max=16, hole_width_max=16, **kwargs)
+    return A.CoarseDropout(num_holes_x=8, hole_height_max=16, hole_width_max=16, **kwargs)
 
 
 def build_train_transform(extra_aug=None):
@@ -189,6 +199,19 @@ def build_train_transform(extra_aug=None):
         A.Rotate(limit=15, p=0.5),
         A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, p=0.4),
         _coarse_dropout(p=0.3),
+        # Sharpness/noise-invariance: dataset audit found DS images are ~2x
+        # sharper/noisier (Laplacian variance) than control images on average —
+        # a source/compression artifact, not a real facial feature. Without
+        # this, models learn "high-frequency noise = Down Syndrome" (confirmed
+        # by pure random noise being classified as DS at 100% confidence).
+        # Randomizing sharpness/noise on every image breaks that correlation.
+        A.OneOf([
+            A.GaussianBlur(blur_limit=(3, 9), p=1.0),
+            A.MotionBlur(blur_limit=(3, 9), p=1.0),
+            A.GaussNoise(std_range=(0.05, 0.35), p=1.0),
+            A.Sharpen(alpha=(0.2, 0.6), lightness=(0.7, 1.3), p=1.0),
+            A.ImageCompression(quality_range=(30, 90), p=1.0),
+        ], p=0.7),
     ]
     if extra_aug:
         aug.extend(extra_aug)
