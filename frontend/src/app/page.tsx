@@ -25,13 +25,20 @@ const MODELS = [
 ] as const;
 
 export default function Home() {
+  const [mode, setMode] = useState<"upload" | "camera">("upload");
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<PredictResponse | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [dragOver, setDragOver] = useState(false);
+  const [cameraReady, setCameraReady] = useState(false);
+  const [autoDetect, setAutoDetect] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const autoTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const loadingRef = useRef(false);
   const toastId = useRef(0);
 
   const toast = (msg: string, err = false) => {
@@ -50,27 +57,12 @@ export default function Home() {
       .catch(() => toast("⚠️ Could not reach the backend API", true));
   }, []);
 
-  const pick = (f: File) => {
-    if (!f.type.startsWith("image/")) return toast("Please select an image file.", true);
-    if (f.size > 10 * 1024 * 1024) return toast("Image exceeds 10 MB limit.", true);
-    setFile(f);
-    setPreview(URL.createObjectURL(f));
-    setResult(null);
-  };
-
-  const clear = () => {
-    setFile(null);
-    setPreview(null);
-    setResult(null);
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  };
-
-  const analyse = async () => {
-    if (!file) return;
+  const runPredict = async (imageFile: File) => {
     setLoading(true);
+    loadingRef.current = true;
     try {
       const fd = new FormData();
-      fd.append("file", file);
+      fd.append("file", imageFile);
       const res = await fetch(`${API_URL}/predict`, { method: "POST", body: fd });
       if (!res.ok) {
         const e = await res.json().catch(() => ({}));
@@ -88,8 +80,87 @@ export default function Home() {
       toast("Error: " + (e as Error).message, true);
     } finally {
       setLoading(false);
+      loadingRef.current = false;
     }
   };
+
+  const stopCamera = () => {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    setCameraReady(false);
+    setAutoDetect(false);
+    if (autoTimerRef.current) clearInterval(autoTimerRef.current);
+  };
+
+  const startCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user" },
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+      }
+      setCameraReady(true);
+    } catch {
+      toast("⚠️ Could not access camera — check browser permissions", true);
+      setMode("upload");
+    }
+  };
+
+  const captureFrame = () => {
+    const video = videoRef.current;
+    if (!video || video.readyState < 2) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.drawImage(video, 0, 0);
+    canvas.toBlob((blob) => {
+      if (blob) runPredict(new File([blob], "capture.jpg", { type: "image/jpeg" }));
+    }, "image/jpeg", 0.9);
+  };
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: mounts/tears down the camera stream when switching modes
+    if (mode === "camera") startCamera();
+    else stopCamera();
+    return () => stopCamera();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
+
+  useEffect(() => {
+    if (!autoDetect) {
+      if (autoTimerRef.current) clearInterval(autoTimerRef.current);
+      return;
+    }
+    autoTimerRef.current = setInterval(() => {
+      if (!loadingRef.current) captureFrame();
+    }, 3500);
+    return () => {
+      if (autoTimerRef.current) clearInterval(autoTimerRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoDetect]);
+
+  const pick = (f: File) => {
+    if (!f.type.startsWith("image/")) return toast("Please select an image file.", true);
+    if (f.size > 10 * 1024 * 1024) return toast("Image exceeds 10 MB limit.", true);
+    setFile(f);
+    setPreview(URL.createObjectURL(f));
+    setResult(null);
+  };
+
+  const clear = () => {
+    setFile(null);
+    setPreview(null);
+    setResult(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const analyse = () => file && runPredict(file);
 
   const isDS = result?.prediction === "Down Syndrome";
   const totalLoaded = result ? Object.keys(result.individual).length : 0;
@@ -155,75 +226,147 @@ export default function Home() {
         </section>
 
         <div className="mx-auto max-w-3xl px-4 pb-20">
-          {/* Upload card */}
-          <div className="mb-6 rounded-2xl border border-[#2a3550] bg-[#111827] p-6">
-            <div className="mb-4 flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-[#94a3b8]">
-              📤 Upload Image
-            </div>
-            <div
-              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if (f) pick(f); }}
-              className={`relative cursor-pointer rounded-xl border-2 border-dashed bg-black/20 px-6 py-9 text-center transition ${
-                dragOver ? "border-[#6366f1] bg-[#6366f1]/10 shadow-[0_0_28px_rgba(99,102,241,.28)]" : "border-[#2a3550]"
+          {/* Mode tabs */}
+          <div className="mb-4 flex gap-2">
+            <button
+              onClick={() => setMode("upload")}
+              className={`flex-1 rounded-xl border px-4 py-2.5 text-sm font-semibold transition ${
+                mode === "upload"
+                  ? "border-[#6366f1] bg-[#6366f1]/10 text-[#6366f1]"
+                  : "border-[#2a3550] bg-[#111827] text-[#94a3b8]"
               }`}
             >
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                className="absolute inset-0 cursor-pointer opacity-0"
-                onChange={(e) => e.target.files?.[0] && pick(e.target.files[0])}
-              />
-              <span className="mb-3 block text-4xl">🖼️</span>
-              <h3 className="mb-1 text-sm font-semibold">Drop facial image here</h3>
-              <p className="text-xs text-[#94a3b8]">JPG, PNG, WEBP — max 10 MB</p>
-              <button
-                type="button"
-                className="mt-4 inline-flex items-center gap-2 rounded-lg bg-gradient-to-br from-[#6366f1] to-[#8b5cf6] px-5 py-2 text-sm font-semibold shadow-[0_4px_14px_rgba(99,102,241,.28)]"
-              >
-                Choose File
-              </button>
-            </div>
-
-            {preview && (
-              <div className="relative mt-4 overflow-hidden rounded-lg border border-[#2a3550]">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={preview} alt="preview" className="block max-h-56 w-full object-cover" />
-                <button
-                  onClick={clear}
-                  className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/70 text-white hover:bg-[#ef4444]"
-                >
-                  ✕
-                </button>
-              </div>
-            )}
-
+              📤 Upload Image
+            </button>
             <button
-              onClick={analyse}
-              disabled={!file || loading}
-              className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-br from-[#6366f1] to-[#06b6d4] py-3 font-bold shadow-[0_4px_20px_rgba(99,102,241,.35)] disabled:cursor-not-allowed disabled:opacity-40"
+              onClick={() => setMode("camera")}
+              className={`flex-1 rounded-xl border px-4 py-2.5 text-sm font-semibold transition ${
+                mode === "camera"
+                  ? "border-[#6366f1] bg-[#6366f1]/10 text-[#6366f1]"
+                  : "border-[#2a3550] bg-[#111827] text-[#94a3b8]"
+              }`}
             >
-              {loading ? (
-                <>
-                  <span className="spinner" /> Analysing…
-                </>
-              ) : result ? (
-                "Analyse Again"
-              ) : file ? (
-                "Analyse Image"
-              ) : (
-                "Select an Image First"
-              )}
+              📷 Live Camera
             </button>
           </div>
+
+          {mode === "upload" ? (
+            /* Upload card */
+            <div className="mb-6 rounded-2xl border border-[#2a3550] bg-[#111827] p-6">
+              <div
+                onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if (f) pick(f); }}
+                className={`relative cursor-pointer rounded-xl border-2 border-dashed bg-black/20 px-6 py-9 text-center transition ${
+                  dragOver ? "border-[#6366f1] bg-[#6366f1]/10 shadow-[0_0_28px_rgba(99,102,241,.28)]" : "border-[#2a3550]"
+                }`}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="absolute inset-0 cursor-pointer opacity-0"
+                  onChange={(e) => e.target.files?.[0] && pick(e.target.files[0])}
+                />
+                <span className="mb-3 block text-4xl">🖼️</span>
+                <h3 className="mb-1 text-sm font-semibold">Drop facial image here</h3>
+                <p className="text-xs text-[#94a3b8]">JPG, PNG, WEBP — max 10 MB</p>
+                <button
+                  type="button"
+                  className="mt-4 inline-flex items-center gap-2 rounded-lg bg-gradient-to-br from-[#6366f1] to-[#8b5cf6] px-5 py-2 text-sm font-semibold shadow-[0_4px_14px_rgba(99,102,241,.28)]"
+                >
+                  Choose File
+                </button>
+              </div>
+
+              {preview && (
+                <div className="relative mt-4 overflow-hidden rounded-lg border border-[#2a3550]">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={preview} alt="preview" className="block max-h-56 w-full object-cover" />
+                  <button
+                    onClick={clear}
+                    className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/70 text-white hover:bg-[#ef4444]"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+
+              <button
+                onClick={analyse}
+                disabled={!file || loading}
+                className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-br from-[#6366f1] to-[#06b6d4] py-3 font-bold shadow-[0_4px_20px_rgba(99,102,241,.35)] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {loading ? (
+                  <>
+                    <span className="spinner" /> Analysing…
+                  </>
+                ) : result ? (
+                  "Analyse Again"
+                ) : file ? (
+                  "Analyse Image"
+                ) : (
+                  "Select an Image First"
+                )}
+              </button>
+            </div>
+          ) : (
+            /* Camera card */
+            <div className="mb-6 rounded-2xl border border-[#2a3550] bg-[#111827] p-6">
+              <div className="relative overflow-hidden rounded-xl border border-[#2a3550] bg-black">
+                <video
+                  ref={videoRef}
+                  playsInline
+                  muted
+                  className="block max-h-96 w-full -scale-x-100 object-contain"
+                />
+                {loading && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+                    <span className="spinner" />
+                  </div>
+                )}
+              </div>
+              <p className="mt-2 text-center text-xs text-[#94a3b8]">
+                Prediction takes a few seconds per frame (3 models on CPU) — this captures a snapshot,
+                not smooth continuous video AI.
+              </p>
+              <div className="mt-4 flex gap-2">
+                <button
+                  onClick={captureFrame}
+                  disabled={!cameraReady || loading}
+                  className="flex-1 flex items-center justify-center gap-2 rounded-lg bg-gradient-to-br from-[#6366f1] to-[#06b6d4] py-3 font-bold shadow-[0_4px_20px_rgba(99,102,241,.35)] disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {loading ? (
+                    <>
+                      <span className="spinner" /> Analysing…
+                    </>
+                  ) : (
+                    "📸 Capture & Analyse"
+                  )}
+                </button>
+                <button
+                  onClick={() => setAutoDetect((a) => !a)}
+                  disabled={!cameraReady}
+                  className={`rounded-lg border px-4 py-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${
+                    autoDetect
+                      ? "border-[#ef4444] bg-[#ef4444]/10 text-[#ef4444]"
+                      : "border-[#2a3550] text-[#94a3b8]"
+                  }`}
+                >
+                  {autoDetect ? "⏹ Stop auto (every 3.5s)" : "▶ Auto-detect every 3.5s"}
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Placeholder */}
           {!result && (
             <div className="mb-6 rounded-2xl border border-[#2a3550] bg-[#111827] px-6 py-14 text-center">
               <span className="mb-3 block text-5xl opacity-25">🔬</span>
               <p className="mx-auto max-w-64 text-sm text-[#94a3b8]">
-                Upload a facial image and click Analyse. Each model&apos;s vote will appear here.
+                {mode === "camera"
+                  ? "Capture a frame from your camera to see each model's vote here."
+                  : "Upload a facial image and click Analyse. Each model's vote will appear here."}
               </p>
             </div>
           )}
