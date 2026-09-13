@@ -6,3 +6,4 @@ torchvision
 timm
 Pillow
 numpy
+opencv-python-headless<5

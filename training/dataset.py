@@ -3,7 +3,6 @@
 
 import os
 import sys
-import shutil
 import random
 import inspect
 from pathlib import Path
@@ -13,6 +12,8 @@ from PIL import Image
 from torch.utils.data import Dataset, DataLoader
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
+
+from face_crop import crop_to_face
 
 IMG_EXTS      = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 DS_KEYWORDS   = ["down", "syndrome", "ds", "positive", "affected"]
@@ -117,9 +118,14 @@ def split_and_copy(folders, class_name, dest_root, seed):
     for split, imgs in splits.items():
         dest = Path(dest_root) / split / class_name
         dest.mkdir(parents=True, exist_ok=True)
+        n_face = 0
         for src in imgs:
-            shutil.copy(src, dest)
-        print(f"   [{split:5s}] {class_name}: {len(imgs)} images")
+            img = Image.open(src).convert("RGB")
+            cropped, found = crop_to_face(img)
+            n_face += int(found)
+            cropped.save(dest / Path(src).name)
+        print(f"   [{split:5s}] {class_name}: {len(imgs)} images "
+              f"(face detected & cropped: {n_face}/{len(imgs)})")
     return splits
 
 

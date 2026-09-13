@@ -17,6 +17,8 @@ import numpy as np
 import io
 import os
 
+from face_crop import crop_to_face
+
 app = FastAPI(title="DeepSyndrome Ensemble API", version="2.0.0")
 
 # ── CORS ─────────────────────────────────────────────────────
@@ -96,13 +98,14 @@ load_all_models()
 
 
 # ── Image Preprocessing ───────────────────────────────────────
-def preprocess(image_bytes: bytes) -> torch.Tensor:
-    img    = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+def preprocess(image_bytes: bytes) -> tuple[torch.Tensor, bool]:
+    img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    img, face_found = crop_to_face(img)
     img    = img.resize((IMG_SIZE, IMG_SIZE), Image.LANCZOS)
     img_np = np.array(img, dtype=np.float32) / 255.0
     img_np = (img_np - MEAN) / STD
     tensor = torch.from_numpy(img_np).permute(2, 0, 1).unsqueeze(0).float()
-    return tensor
+    return tensor, face_found
 
 
 # ── Ensemble Prediction ───────────────────────────────────────
@@ -209,7 +212,7 @@ async def predict(file: UploadFile = File(...)):
 
     # Real prediction
     try:
-        tensor = preprocess(contents)
+        tensor, face_found = preprocess(contents)
         avg_probs, pred_idx = ensemble_predict(tensor)
 
         if avg_probs is None:
@@ -239,7 +242,8 @@ async def predict(file: UploadFile = File(...)):
             },
             "models_used":   list(loaded_models.keys()),
             "individual":    individual,
-            "demo_mode":     False
+            "demo_mode":     False,
+            "face_detected": face_found,
         }
 
     except HTTPException:
