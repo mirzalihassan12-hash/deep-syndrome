@@ -1,0 +1,10 @@
+# Dependencies for the Hugging Face Spaces Gradio deployment (app_hf.py).
+# Not the same as requirements.txt (FastAPI backend) - no fastapi/uvicorn
+# needed here since Gradio handles serving itself.
+torch
+torchvision
+timm
+Pillow
+numpy
+opencv-python-headless<5
+spaces

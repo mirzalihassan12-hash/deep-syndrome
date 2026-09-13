@@ -3,7 +3,8 @@ title: Deepsyndrome Api
 emoji: 🧬
 colorFrom: indigo
 colorTo: cyan
-sdk: docker
+sdk: gradio
+app_file: app_hf.py
 pinned: false
 ---
 
