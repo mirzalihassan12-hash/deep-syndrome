@@ -88,28 +88,49 @@ def run_gradcam(model, model_name, test_loader, device, results_dir, n=6):
         if "EfficientNet"  in name: return [m.conv_head]
         return [m.blocks[-1].norm1]  # ViT
 
+    def vit_reshape_transform(tensor):
+        # ViT activations are (batch, 1 + num_patches, embed_dim) — a CLS token
+        # plus a flat sequence of patch tokens, not a spatial (C, H, W) feature
+        # map like a CNN. Grad-CAM needs a spatial map, so drop the CLS token
+        # and reshape the remaining patch tokens back into their square grid.
+        num_patches = tensor.size(1) - 1
+        side = int(round(num_patches ** 0.5))
+        result = tensor[:, 1:, :].reshape(tensor.size(0), side, side, tensor.size(2))
+        return result.transpose(2, 3).transpose(1, 2)
+
     model.eval()
-    cam      = GradCAM(model=model, target_layers=get_layer(model, model_name))
-    imgs_b, lbls_b = next(iter(test_loader))
-    imgs_b   = imgs_b[:n]; lbls_b = lbls_b[:n]
+    is_vit = "ViT" in model_name
+    try:
+        cam = GradCAM(
+            model=model,
+            target_layers=get_layer(model, model_name),
+            reshape_transform=vit_reshape_transform if is_vit else None,
+        )
+        imgs_b, lbls_b = next(iter(test_loader))
+        imgs_b   = imgs_b[:n]; lbls_b = lbls_b[:n]
 
-    MEAN_A = np.array([0.485, 0.456, 0.406])
-    STD_A  = np.array([0.229, 0.224, 0.225])
+        MEAN_A = np.array([0.485, 0.456, 0.406])
+        STD_A  = np.array([0.229, 0.224, 0.225])
 
-    fig, axes = plt.subplots(2, n, figsize=(n * 3, 6))
-    for i in range(n):
-        inp    = imgs_b[i].unsqueeze(0).to(device)
-        gc     = cam(input_tensor=inp, targets=[ClassifierOutputTarget(1)])[0]
-        img_np = (imgs_b[i].permute(1, 2, 0).numpy() * STD_A + MEAN_A).clip(0, 1).astype(np.float32)
-        cam_img = show_cam_on_image(img_np, gc, use_rgb=True)
-        lbl    = "Down Syn" if lbls_b[i].item() == 1 else "Control"
-        axes[0, i].imshow(img_np);  axes[0, i].set_title(f"Original\n{lbl}", fontsize=8); axes[0, i].axis("off")
-        axes[1, i].imshow(cam_img); axes[1, i].set_title("Grad-CAM", fontsize=8);          axes[1, i].axis("off")
+        fig, axes = plt.subplots(2, n, figsize=(n * 3, 6))
+        for i in range(n):
+            inp    = imgs_b[i].unsqueeze(0).to(device)
+            gc     = cam(input_tensor=inp, targets=[ClassifierOutputTarget(1)])[0]
+            img_np = (imgs_b[i].permute(1, 2, 0).numpy() * STD_A + MEAN_A).clip(0, 1).astype(np.float32)
+            cam_img = show_cam_on_image(img_np, gc, use_rgb=True)
+            lbl    = "Down Syn" if lbls_b[i].item() == 1 else "Control"
+            axes[0, i].imshow(img_np);  axes[0, i].set_title(f"Original\n{lbl}", fontsize=8); axes[0, i].axis("off")
+            axes[1, i].imshow(cam_img); axes[1, i].set_title("Grad-CAM", fontsize=8);          axes[1, i].axis("off")
 
-    plt.suptitle(f"Grad-CAM — {model_name}", fontsize=13, fontweight="bold")
-    plt.tight_layout()
-    safe = model_name.replace("/", "_").replace(" ", "_").replace("-", "_")
-    out  = Path(results_dir) / f"{safe}_gradcam.png"
-    plt.savefig(out, dpi=150)
-    plt.close()
-    print(f"[OK]   Grad-CAM -> {out}")
+        plt.suptitle(f"Grad-CAM — {model_name}", fontsize=13, fontweight="bold")
+        plt.tight_layout()
+        safe = model_name.replace("/", "_").replace(" ", "_").replace("-", "_")
+        out  = Path(results_dir) / f"{safe}_gradcam.png"
+        plt.savefig(out, dpi=150)
+        plt.close()
+        print(f"[OK]   Grad-CAM -> {out}")
+    except Exception as e:
+        # Grad-CAM is a nice-to-have visualization, not critical output — a
+        # failure here must never take down a training run that already
+        # produced valid weights/metrics.
+        print(f"[WARN] Grad-CAM failed for {model_name}: {e}")
