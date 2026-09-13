@@ -64,3 +64,6 @@ _dataset_split/
 
 # Docs
 docs/
+
+# Local test images (may contain identifiable faces - never commit)
+test_samples/
