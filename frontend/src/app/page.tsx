@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Client } from "@gradio/client";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:7860";
+// Hugging Face Space reference, e.g. "username/space-name" or a full URL.
+const HF_SPACE = process.env.NEXT_PUBLIC_HF_SPACE || "mirzalihassan12/syndrome-model";
 
 type ModelVote = { prediction: string; confidence: number };
 
@@ -40,6 +42,7 @@ export default function Home() {
   const autoTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const loadingRef = useRef(false);
   const toastId = useRef(0);
+  const clientRef = useRef<Client | null>(null);
 
   const toast = (msg: string, err = false) => {
     const id = ++toastId.current;
@@ -47,28 +50,26 @@ export default function Home() {
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4000);
   };
 
+  const getClient = async () => {
+    if (!clientRef.current) {
+      clientRef.current = await Client.connect(HF_SPACE);
+    }
+    return clientRef.current;
+  };
+
   useEffect(() => {
-    fetch(`${API_URL}/health`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.models_ready === 0) toast("⚠️ No model weights — Demo Mode active");
-        else toast(`✅ ${d.models_ready}/3 models loaded and ready`);
-      })
-      .catch(() => toast("⚠️ Could not reach the backend API", true));
+    getClient()
+      .then(() => toast("✅ Connected to model backend"))
+      .catch(() => toast("⚠️ Could not reach the Hugging Face Space", true));
   }, []);
 
   const runPredict = async (imageFile: File) => {
     setLoading(true);
     loadingRef.current = true;
     try {
-      const fd = new FormData();
-      fd.append("file", imageFile);
-      const res = await fetch(`${API_URL}/predict`, { method: "POST", body: fd });
-      if (!res.ok) {
-        const e = await res.json().catch(() => ({}));
-        throw new Error(e.detail || "Server error");
-      }
-      const data: PredictResponse = await res.json();
+      const client = await getClient();
+      const res = await client.predict("/run_prediction", [imageFile]);
+      const [, , data] = res.data as [unknown, unknown, PredictResponse];
       setResult(data);
       toast(
         data.prediction === "Down Syndrome"
@@ -524,8 +525,8 @@ export default function Home() {
 
         <footer className="border-t border-[#2a3550] px-4 py-7 text-center text-sm text-[#94a3b8]">
           DeepSyndrome v2.0 · Ensemble: ResNet-50 + EfficientNet-B3 + ViT-S/16 ·{" "}
-          <a href={`${API_URL}/docs`} className="text-[#6366f1] hover:underline">
-            API Docs
+          <a href={`https://huggingface.co/spaces/${HF_SPACE}`} className="text-[#6366f1] hover:underline">
+            Model Space
           </a>
         </footer>
       </div>
