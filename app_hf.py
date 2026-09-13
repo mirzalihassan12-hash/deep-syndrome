@@ -21,20 +21,31 @@ DISCLAIMER = (
 
 @spaces.GPU
 def run_prediction(image: Image.Image):
+    """
+    Returns (markdown_summary, label_probs, structured_json). The third
+    output is a hidden component - it exists so the Next.js frontend (via
+    @gradio/client) can consume the same structured shape the FastAPI
+    backend returns, instead of parsing the markdown text.
+    """
     if image is None:
-        return "Please upload a facial image.", None
+        return "Please upload a facial image.", None, {"error": "no_image"}
 
     buf = io.BytesIO()
     image.convert("RGB").save(buf, format="JPEG")
     image_bytes = buf.getvalue()
 
     if not loaded_models:
-        return "⚠️ Demo Mode — no model weights found on this Space.", None
+        empty_json = {
+            "prediction": None, "confidence": 0, "probabilities": {},
+            "models_used": [], "individual": {}, "demo_mode": True,
+            "face_detected": False,
+        }
+        return "⚠️ Demo Mode — no model weights found on this Space.", None, empty_json
 
     tensor, face_found = preprocess(image_bytes)
     avg_probs, pred_idx = ensemble_predict(tensor)
     if avg_probs is None:
-        return "Prediction failed — no models loaded.", None
+        return "Prediction failed — no models loaded.", None, {"error": "prediction_failed"}
 
     pred_label = "Down Syndrome" if pred_idx == 1 else "Control"
     confidence = float(avg_probs[pred_idx]) * 100
@@ -55,7 +66,19 @@ def run_prediction(image: Image.Image):
         "Control": float(avg_probs[0]),
         "Down Syndrome": float(avg_probs[1]),
     }
-    return "\n".join(lines), probs_out
+    structured = {
+        "prediction":    pred_label,
+        "confidence":    round(confidence, 2),
+        "probabilities": {
+            "control":       round(float(avg_probs[0]) * 100, 2),
+            "down_syndrome": round(float(avg_probs[1]) * 100, 2),
+        },
+        "models_used":   list(loaded_models.keys()),
+        "individual":    individual,
+        "demo_mode":     False,
+        "face_detected": face_found,
+    }
+    return "\n".join(lines), probs_out, structured
 
 
 demo = gr.Interface(
@@ -64,6 +87,7 @@ demo = gr.Interface(
     outputs=[
         gr.Markdown(label="Result"),
         gr.Label(label="Class probabilities"),
+        gr.JSON(label="Structured result (used by the web app)", visible=False),
     ],
     title="🧬 DeepSyndrome — Ensemble Down Syndrome Screening",
     description=(
