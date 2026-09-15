@@ -67,3 +67,6 @@ docs/
 
 # Local test images (may contain identifiable faces - never commit)
 test_samples/
+
+# Doctor Mode exports - real patient photos submitted by clinicians, never commit
+data/doctor_confirmed/

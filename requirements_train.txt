@@ -20,3 +20,6 @@ pandas
 
 # Grad-CAM visualization (optional but recommended)
 grad-cam
+
+# Doctor Mode data export (offline script, not part of the deployed service)
+pymongo

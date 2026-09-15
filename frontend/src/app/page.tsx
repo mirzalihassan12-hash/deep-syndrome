@@ -44,6 +44,14 @@ export default function Home() {
   const [dragOver, setDragOver] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
   const [autoDetect, setAutoDetect] = useState(false);
+  const [lastFile, setLastFile] = useState<File | null>(null);
+  const [doctor, setDoctor] = useState<{ name: string; email: string } | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [authMode, setAuthMode] = useState<"login" | "register">("login");
+  const [authForm, setAuthForm] = useState({ name: "", email: "", password: "" });
+  const [authSubmitting, setAuthSubmitting] = useState(false);
+  const [savingLabel, setSavingLabel] = useState<"Down Syndrome" | "Control" | null>(null);
+  const [savedSampleId, setSavedSampleId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -71,7 +79,16 @@ export default function Home() {
       .catch(() => toast("⚠️ Could not reach the Hugging Face Space", true));
   }, []);
 
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((r) => r.json())
+      .then((d) => setDoctor(d.doctor))
+      .catch(() => setDoctor(null))
+      .finally(() => setAuthChecked(true));
+  }, []);
+
   const runPredict = async (imageFile: File) => {
+    setLastFile(imageFile);
     setLoading(true);
     loadingRef.current = true;
     try {
@@ -79,6 +96,7 @@ export default function Home() {
       const res = await client.predict("/run_prediction", [imageFile]);
       const [, , data] = res.data as [unknown, unknown, PredictResponse];
       setResult(data);
+      setSavedSampleId(null);
       if (data.confidence < UNCERTAIN_THRESHOLD) {
         toast(`❓ Uncertain (${data.confidence.toFixed(1)}%) — recommend professional evaluation`, false);
       } else {
@@ -94,6 +112,68 @@ export default function Home() {
     } finally {
       setLoading(false);
       loadingRef.current = false;
+    }
+  };
+
+  const submitAuth = async () => {
+    if (!authForm.email || !authForm.password) return;
+    if (authMode === "register" && !authForm.name) return;
+    setAuthSubmitting(true);
+    try {
+      const endpoint = authMode === "register" ? "/api/auth/register" : "/api/auth/login";
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(authForm),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setDoctor(data.doctor);
+        setAuthForm({ name: "", email: "", password: "" });
+        toast(`🩺 ${authMode === "register" ? "Registered" : "Logged in"} as Dr. ${data.doctor.name}`);
+      } else {
+        toast(data.error || "Authentication failed.", true);
+      }
+    } catch (e) {
+      toast("Error: " + (e as Error).message, true);
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
+  const logout = async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch {
+      // ignore network errors on logout - clear local state regardless
+    }
+    setDoctor(null);
+  };
+
+  const confirmSample = async (label: "Down Syndrome" | "Control") => {
+    if (!lastFile || !result) return;
+    setSavingLabel(label);
+    try {
+      const body = new FormData();
+      body.append("image", lastFile, lastFile.name || "sample.jpg");
+      body.append("doctorLabel", label);
+      body.append("modelPrediction", result.prediction);
+      body.append("confidence", String(result.confidence));
+      body.append("faceDetected", String(result.face_detected ?? true));
+
+      const res = await fetch("/api/confirm-sample", { method: "POST", body });
+      const data = await res.json();
+      if (data.ok) {
+        setSavedSampleId(data.id);
+        toast("✔️ Saved for future training");
+      } else {
+        if (res.status === 401) setDoctor(null); // stale/invalid session - re-show login
+        toast(data.error || "Failed to save sample.", true);
+      }
+    } catch (e) {
+      toast("Error saving sample: " + (e as Error).message, true);
+    } finally {
+      setSavingLabel(null);
     }
   };
 
@@ -459,6 +539,104 @@ export default function Home() {
                   diagnosis.</span> Always consult a qualified healthcare professional for an accurate
                   assessment — regardless of what this tool shows.
                 </div>
+              </div>
+
+              {/* Doctor Mode */}
+              <div className="mb-5 rounded-2xl border border-[#2a3550] bg-[#111827] p-6">
+                <div className="mb-3 flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-[#94a3b8]">
+                    🩺 Doctor Mode — Confirm Ground Truth
+                  </div>
+                  {doctor && (
+                    <button onClick={logout} className="text-xs text-[#94a3b8] hover:text-[#ef4444]">
+                      Log out
+                    </button>
+                  )}
+                </div>
+
+                {!authChecked ? (
+                  <p className="text-sm text-[#94a3b8]">Checking session…</p>
+                ) : !doctor ? (
+                  <div>
+                    <div className="mb-3 flex gap-4 text-sm">
+                      <button
+                        onClick={() => setAuthMode("login")}
+                        className={authMode === "login" ? "font-bold text-[#6366f1]" : "text-[#94a3b8]"}
+                      >
+                        Log in
+                      </button>
+                      <button
+                        onClick={() => setAuthMode("register")}
+                        className={authMode === "register" ? "font-bold text-[#6366f1]" : "text-[#94a3b8]"}
+                      >
+                        Register
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {authMode === "register" && (
+                        <input
+                          type="text"
+                          value={authForm.name}
+                          onChange={(e) => setAuthForm((f) => ({ ...f, name: e.target.value }))}
+                          placeholder="Full name"
+                          className="min-w-32 flex-1 rounded-lg border border-[#2a3550] bg-black/20 px-3 py-2 text-sm"
+                        />
+                      )}
+                      <input
+                        type="email"
+                        value={authForm.email}
+                        onChange={(e) => setAuthForm((f) => ({ ...f, email: e.target.value }))}
+                        placeholder="Email"
+                        className="min-w-40 flex-1 rounded-lg border border-[#2a3550] bg-black/20 px-3 py-2 text-sm"
+                      />
+                      <input
+                        type="password"
+                        value={authForm.password}
+                        onChange={(e) => setAuthForm((f) => ({ ...f, password: e.target.value }))}
+                        onKeyDown={(e) => e.key === "Enter" && submitAuth()}
+                        placeholder="Password"
+                        className="min-w-32 flex-1 rounded-lg border border-[#2a3550] bg-black/20 px-3 py-2 text-sm"
+                      />
+                      <button
+                        onClick={submitAuth}
+                        disabled={authSubmitting}
+                        className="rounded-lg border border-[#6366f1] px-4 py-2 text-sm font-semibold text-[#6366f1] disabled:opacity-40"
+                      >
+                        {authSubmitting ? "…" : authMode === "register" ? "Create account" : "Log in"}
+                      </button>
+                    </div>
+                    <p className="mt-3 text-xs text-[#94a3b8]">
+                      For clinicians: confirming the real diagnosis helps retrain and improve the model.
+                    </p>
+                  </div>
+                ) : (
+                  <div>
+                    <p className="mb-3 text-sm text-[#94a3b8]">
+                      Logged in as <span className="font-semibold text-[#f1f5f9]">Dr. {doctor.name}</span>.
+                      {savedSampleId ? "" : " What is the confirmed diagnosis for this image?"}
+                    </p>
+                    {savedSampleId ? (
+                      <div className="text-sm font-semibold text-[#10b981]">✔️ Saved for future training</div>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => confirmSample("Down Syndrome")}
+                          disabled={!!savingLabel}
+                          className="rounded-lg border border-[#ef4444] bg-[#ef4444]/10 px-4 py-2 text-sm font-semibold text-[#ef4444] disabled:opacity-40"
+                        >
+                          {savingLabel === "Down Syndrome" ? "Saving…" : "Confirm: Down Syndrome"}
+                        </button>
+                        <button
+                          onClick={() => confirmSample("Control")}
+                          disabled={!!savingLabel}
+                          className="rounded-lg border border-[#10b981] bg-[#10b981]/10 px-4 py-2 text-sm font-semibold text-[#10b981] disabled:opacity-40"
+                        >
+                          {savingLabel === "Control" ? "Saving…" : "Confirm: Control"}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Probability bars */}
