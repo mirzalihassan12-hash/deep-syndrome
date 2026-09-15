@@ -15,8 +15,16 @@ type PredictResponse = {
   models_used: string[];
   individual: Record<string, ModelVote>;
   demo_mode: boolean;
+  face_detected?: boolean;
   message?: string;
 };
+
+// Below this confidence, treat the result as "uncertain" rather than a
+// clear verdict. Justified by our own held-out test: every misclassification
+// we found was a low-confidence call, not a confident mistake - so a
+// screening tool used in the field should say "uncertain, get it checked"
+// instead of presenting a coin-flip as a confident answer either way.
+const UNCERTAIN_THRESHOLD = 65;
 
 type Toast = { id: number; msg: string; err: boolean };
 
@@ -71,12 +79,16 @@ export default function Home() {
       const res = await client.predict("/run_prediction", [imageFile]);
       const [, , data] = res.data as [unknown, unknown, PredictResponse];
       setResult(data);
-      toast(
-        data.prediction === "Down Syndrome"
-          ? `⚠️ Down Syndrome — ${data.confidence.toFixed(1)}% confidence`
-          : `✅ Control — ${data.confidence.toFixed(1)}% confidence`,
-        data.prediction === "Down Syndrome"
-      );
+      if (data.confidence < UNCERTAIN_THRESHOLD) {
+        toast(`❓ Uncertain (${data.confidence.toFixed(1)}%) — recommend professional evaluation`, false);
+      } else {
+        toast(
+          data.prediction === "Down Syndrome"
+            ? `⚠️ Down Syndrome — ${data.confidence.toFixed(1)}% confidence`
+            : `✅ Control — ${data.confidence.toFixed(1)}% confidence`,
+          data.prediction === "Down Syndrome"
+        );
+      }
     } catch (e) {
       toast("Error: " + (e as Error).message, true);
     } finally {
@@ -164,6 +176,8 @@ export default function Home() {
   const analyse = () => file && runPredict(file);
 
   const isDS = result?.prediction === "Down Syndrome";
+  const isUncertain = result ? result.confidence < UNCERTAIN_THRESHOLD : false;
+  const noFaceDetected = result ? result.face_detected === false : false;
   const totalLoaded = result ? Object.keys(result.individual).length : 0;
   const dsVotes = result
     ? Object.values(result.individual).filter((v) => v.prediction === "Down Syndrome").length
@@ -375,21 +389,49 @@ export default function Home() {
           {/* Result */}
           {result && (
             <div>
+              {/* No-face-detected warning */}
+              {noFaceDetected && (
+                <div className="mb-4 flex items-start gap-3 rounded-xl border border-[#f59e0b] bg-[#f59e0b]/10 p-4 text-sm">
+                  <span className="text-lg">📷</span>
+                  <div>
+                    <div className="font-bold text-[#f59e0b]">No face detected in this image</div>
+                    <div className="text-[#94a3b8]">
+                      The result below is based on the full image rather than a cropped face, and is
+                      less reliable. Try a clearer, front-facing photo.
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Verdict banner */}
               <div
                 className={`mb-5 flex flex-wrap items-center justify-between gap-4 rounded-2xl border p-6 ${
-                  isDS ? "border-[#ef4444]/50 bg-[#ef4444]/10" : "border-[#10b981]/50 bg-[#10b981]/10"
+                  isUncertain
+                    ? "border-[#f59e0b]/50 bg-[#f59e0b]/10"
+                    : isDS
+                    ? "border-[#ef4444]/50 bg-[#ef4444]/10"
+                    : "border-[#10b981]/50 bg-[#10b981]/10"
                 }`}
               >
                 <div className="flex items-center gap-5">
-                  <div className="text-4xl">{isDS ? "⚠️" : "✅"}</div>
+                  <div className="text-4xl">{isUncertain ? "❓" : isDS ? "⚠️" : "✅"}</div>
                   <div>
                     <div className="mb-1 text-xs uppercase tracking-widest text-[#94a3b8]">
-                      Ensemble Verdict
+                      {isUncertain ? "Result Uncertain" : "Ensemble Verdict"}
                     </div>
-                    <div className={`text-2xl font-extrabold ${isDS ? "text-[#ef4444]" : "text-[#10b981]"}`}>
-                      {result.prediction}
+                    <div
+                      className={`text-2xl font-extrabold ${
+                        isUncertain ? "text-[#f59e0b]" : isDS ? "text-[#ef4444]" : "text-[#10b981]"
+                      }`}
+                    >
+                      {isUncertain ? "Recommend Professional Evaluation" : result.prediction}
                     </div>
+                    {isUncertain && (
+                      <div className="mt-1 text-xs text-[#94a3b8]">
+                        Models leaned toward &ldquo;{result.prediction}&rdquo;, but confidence was too
+                        close to call reliably.
+                      </div>
+                    )}
                     {result.demo_mode && (
                       <span className="mt-2 inline-flex items-center gap-1 rounded-full border border-[#f59e0b] bg-[#f59e0b]/10 px-3 py-1 text-xs font-semibold text-[#f59e0b]">
                         ⚠️ Demo Mode — no .pth weights loaded
@@ -398,10 +440,24 @@ export default function Home() {
                   </div>
                 </div>
                 <div className="text-center">
-                  <div className={`text-4xl font-black ${isDS ? "text-[#ef4444]" : "text-[#10b981]"}`}>
+                  <div
+                    className={`text-4xl font-black ${
+                      isUncertain ? "text-[#f59e0b]" : isDS ? "text-[#ef4444]" : "text-[#10b981]"
+                    }`}
+                  >
                     {result.confidence.toFixed(1)}%
                   </div>
                   <div className="text-xs uppercase tracking-wide text-[#94a3b8]">Confidence</div>
+                </div>
+              </div>
+
+              {/* Disclaimer - always shown with a result, not buried in the footer */}
+              <div className="mb-5 flex items-start gap-3 rounded-xl border border-[#2a3550] bg-[#111827] p-4 text-sm">
+                <span className="text-lg">ℹ️</span>
+                <div className="text-[#94a3b8]">
+                  <span className="font-bold text-[#f1f5f9]">This is a screening aid, not a medical
+                  diagnosis.</span> Always consult a qualified healthcare professional for an accurate
+                  assessment — regardless of what this tool shows.
                 </div>
               </div>
 
