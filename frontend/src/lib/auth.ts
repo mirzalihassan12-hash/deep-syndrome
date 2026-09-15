@@ -4,7 +4,8 @@ import type { NextRequest } from "next/server";
 export const SESSION_COOKIE = "doctor_session";
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 7; // 7 days
 
-export type SessionDoctor = { id: string; email: string; name: string };
+export type Role = "doctor" | "admin";
+export type SessionDoctor = { id: string; email: string; name: string; role: Role };
 
 function getSecret(): string {
   const secret = process.env.JWT_SECRET;
@@ -26,7 +27,8 @@ export function verifySession(token: string): SessionDoctor | null {
       "email" in decoded &&
       "name" in decoded
     ) {
-      return { id: String(decoded.id), email: String(decoded.email), name: String(decoded.name) };
+      const role = "role" in decoded && decoded.role === "admin" ? "admin" : "doctor";
+      return { id: String(decoded.id), email: String(decoded.email), name: String(decoded.name), role };
     }
     return null;
   } catch {

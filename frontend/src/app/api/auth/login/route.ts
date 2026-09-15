@@ -28,12 +28,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: INVALID_MSG }, { status: 401 });
     }
 
+    const role = doctor.role === "admin" ? "admin" : "doctor";
     const token = signSession({
       id: doctor._id.toString(),
       email: doctor.email,
       name: doctor.name,
+      role,
     });
-    const res = NextResponse.json({ ok: true, doctor: { name: doctor.name, email: doctor.email } });
+    const res = NextResponse.json({
+      ok: true,
+      doctor: { name: doctor.name, email: doctor.email, role },
+    });
     res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions);
     return res;
   } catch (err) {

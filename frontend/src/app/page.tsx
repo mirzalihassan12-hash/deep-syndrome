@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { Client } from "@gradio/client";
 
 // Hugging Face Space reference, e.g. "username/space-name" or a full URL.
@@ -45,7 +46,9 @@ export default function Home() {
   const [cameraReady, setCameraReady] = useState(false);
   const [autoDetect, setAutoDetect] = useState(false);
   const [lastFile, setLastFile] = useState<File | null>(null);
-  const [doctor, setDoctor] = useState<{ name: string; email: string } | null>(null);
+  const [doctor, setDoctor] = useState<{ name: string; email: string; role?: string } | null>(null);
+  const [patients, setPatients] = useState<{ id: string; name: string }[]>([]);
+  const [selectedPatientId, setSelectedPatientId] = useState<string>("");
   const [authChecked, setAuthChecked] = useState(false);
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [authForm, setAuthForm] = useState({ name: "", email: "", password: "" });
@@ -86,6 +89,18 @@ export default function Home() {
       .catch(() => setDoctor(null))
       .finally(() => setAuthChecked(true));
   }, []);
+
+  useEffect(() => {
+    if (!doctor) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: clears the patient list on logout
+      setPatients([]);
+      return;
+    }
+    fetch("/api/patients")
+      .then((r) => r.json())
+      .then((d) => setPatients(d.ok ? d.patients : []))
+      .catch(() => setPatients([]));
+  }, [doctor]);
 
   const runPredict = async (imageFile: File) => {
     setLastFile(imageFile);
@@ -160,6 +175,7 @@ export default function Home() {
       body.append("modelPrediction", result.prediction);
       body.append("confidence", String(result.confidence));
       body.append("faceDetected", String(result.face_detected ?? true));
+      if (selectedPatientId) body.append("patientId", selectedPatientId);
 
       const res = await fetch("/api/confirm-sample", { method: "POST", body });
       const data = await res.json();
@@ -548,9 +564,19 @@ export default function Home() {
                     🩺 Doctor Mode — Confirm Ground Truth
                   </div>
                   {doctor && (
-                    <button onClick={logout} className="text-xs text-[#94a3b8] hover:text-[#ef4444]">
-                      Log out
-                    </button>
+                    <div className="flex items-center gap-3 text-xs">
+                      <Link href="/patients" className="text-[#6366f1] hover:underline">
+                        Patients
+                      </Link>
+                      {doctor.role === "admin" && (
+                        <Link href="/admin" className="text-[#6366f1] hover:underline">
+                          Admin
+                        </Link>
+                      )}
+                      <button onClick={logout} className="text-[#94a3b8] hover:text-[#ef4444]">
+                        Log out
+                      </button>
+                    </div>
                   )}
                 </div>
 
@@ -618,7 +644,22 @@ export default function Home() {
                     {savedSampleId ? (
                       <div className="text-sm font-semibold text-[#10b981]">✔️ Saved for future training</div>
                     ) : (
-                      <div className="flex flex-wrap gap-2">
+                      <div>
+                        {patients.length > 0 && (
+                          <select
+                            value={selectedPatientId}
+                            onChange={(e) => setSelectedPatientId(e.target.value)}
+                            className="mb-3 w-full rounded-lg border border-[#2a3550] bg-black/20 px-3 py-2 text-sm"
+                          >
+                            <option value="">No patient record (don&apos;t link this sample)</option>
+                            {patients.map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {p.name}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                        <div className="flex flex-wrap gap-2">
                         <button
                           onClick={() => confirmSample("Down Syndrome")}
                           disabled={!!savingLabel}
@@ -633,6 +674,7 @@ export default function Home() {
                         >
                           {savingLabel === "Control" ? "Saving…" : "Confirm: Control"}
                         </button>
+                        </div>
                       </div>
                     )}
                   </div>

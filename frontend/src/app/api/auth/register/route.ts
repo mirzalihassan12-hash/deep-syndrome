@@ -39,15 +39,18 @@ export async function POST(req: NextRequest) {
     }
 
     const password_hash = await bcrypt.hash(password, 10);
+    // Public registration is always "doctor" - admin status is granted
+    // manually (see docs), never self-assignable through this form.
     const result = await doctors.insertOne({
       name,
       email,
       password_hash,
+      role: "doctor",
       created_at: new Date(),
     });
 
-    const token = signSession({ id: result.insertedId.toString(), email, name });
-    const res = NextResponse.json({ ok: true, doctor: { name, email } });
+    const token = signSession({ id: result.insertedId.toString(), email, name, role: "doctor" });
+    const res = NextResponse.json({ ok: true, doctor: { name, email, role: "doctor" } });
     res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions);
     return res;
   } catch (err) {

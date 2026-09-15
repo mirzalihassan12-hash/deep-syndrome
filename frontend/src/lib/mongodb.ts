@@ -43,3 +43,8 @@ export async function getConfirmedSamplesCollection() {
   const db = await getDb();
   return db.collection("confirmed_samples");
 }
+
+export async function getPatientsCollection() {
+  const db = await getDb();
+  return db.collection("patients");
+}

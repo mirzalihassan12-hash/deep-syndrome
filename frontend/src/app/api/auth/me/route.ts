@@ -8,5 +8,7 @@ export async function GET(req: NextRequest) {
   if (!session) {
     return NextResponse.json({ doctor: null });
   }
-  return NextResponse.json({ doctor: { name: session.name, email: session.email } });
+  return NextResponse.json({
+    doctor: { name: session.name, email: session.email, role: session.role },
+  });
 }
