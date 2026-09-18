@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Vendored third-party ONNX Runtime WASM glue - not our code to lint.
+    "public/ort/**",
   ]),
 ]);
 

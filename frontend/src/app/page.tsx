@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Client } from "@gradio/client";
+import { runOfflineViT, preloadOfflineModel } from "@/lib/offlineInference";
 
 // Hugging Face Space reference, e.g. "username/space-name" or a full URL.
 const HF_SPACE = process.env.NEXT_PUBLIC_HF_SPACE || "mirzalihassan12/syndrome-model";
@@ -17,6 +18,7 @@ type PredictResponse = {
   individual: Record<string, ModelVote>;
   demo_mode: boolean;
   face_detected?: boolean;
+  offline?: boolean;
   message?: string;
 };
 
@@ -46,6 +48,7 @@ export default function Home() {
   const [cameraReady, setCameraReady] = useState(false);
   const [autoDetect, setAutoDetect] = useState(false);
   const [lastFile, setLastFile] = useState<File | null>(null);
+  const [offlineReady, setOfflineReady] = useState(false);
   const [doctor, setDoctor] = useState<{ name: string; email: string; role?: string } | null>(null);
   const [patients, setPatients] = useState<{ id: string; name: string }[]>([]);
   const [selectedPatientId, setSelectedPatientId] = useState<string>("");
@@ -83,6 +86,32 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").catch(() => {});
+    }
+    // Warm up the offline model in the background once the page is idle, so
+    // it's cached for offline use without slowing down the initial page load.
+    const idleId = setTimeout(() => {
+      preloadOfflineModel().then((ok) => {
+        if (ok) {
+          setOfflineReady(true);
+          toast("✅ Offline mode ready — on-device model cached");
+        }
+      });
+    }, 1500);
+
+    const onOffline = () => toast("📴 Offline — predictions will use the on-device model", true);
+    const onOnline = () => toast("✅ Back online — using the full 3-model ensemble again");
+    window.addEventListener("offline", onOffline);
+    window.addEventListener("online", onOnline);
+    return () => {
+      clearTimeout(idleId);
+      window.removeEventListener("offline", onOffline);
+      window.removeEventListener("online", onOnline);
+    };
+  }, []);
+
+  useEffect(() => {
     fetch("/api/auth/me")
       .then((r) => r.json())
       .then((d) => setDoctor(d.doctor))
@@ -107,9 +136,33 @@ export default function Home() {
     setLoading(true);
     loadingRef.current = true;
     try {
-      const client = await getClient();
-      const res = await client.predict("/run_prediction", [imageFile]);
-      const [, , data] = res.data as [unknown, unknown, PredictResponse];
+      let data: PredictResponse;
+      if (!navigator.onLine) {
+        toast("📴 Offline — using on-device model (ViT-S/16 only, no face-crop)");
+        data = await runOfflineViT(imageFile);
+      } else {
+        // navigator.onLine only reflects the OS network interface, not actual
+        // reachability - it can report "online" even when the HF Space is
+        // unreachable (rate-limited, cold, or a real outage). @gradio/client
+        // also doesn't always reject cleanly when the network is down (it can
+        // log internal errors and hang rather than throw) - so a plain
+        // try/catch isn't enough. Race it against a timeout instead, and fall
+        // back to the on-device model whichever way it fails to respond.
+        const withTimeout = <T,>(p: Promise<T>, ms: number) =>
+          new Promise<T>((resolve, reject) => {
+            const t = setTimeout(() => reject(new Error("timed out")), ms);
+            p.then((v) => { clearTimeout(t); resolve(v); }, (e) => { clearTimeout(t); reject(e); });
+          });
+
+        try {
+          const client = await withTimeout(getClient(), 8000);
+          const res = await withTimeout(client.predict("/run_prediction", [imageFile]), 20000);
+          [, , data] = res.data as [unknown, unknown, PredictResponse];
+        } catch {
+          toast("⚠️ Online model unreachable — using on-device model instead", true);
+          data = await runOfflineViT(imageFile);
+        }
+      }
       setResult(data);
       setSavedSampleId(null);
       if (data.confidence < UNCERTAIN_THRESHOLD) {
@@ -321,6 +374,7 @@ export default function Home() {
         <section className="px-6 pb-10 pt-12 text-center">
           <div className="mx-auto mb-6 inline-flex items-center gap-2 rounded-full border border-[#2a3550] bg-[#1a2235]/60 px-4 py-1.5 text-xs text-[#94a3b8]">
             <span className="h-1.5 w-1.5 rounded-full bg-[#10b981] dot-blink" /> Ensemble · 3 Models · Live
+            {offlineReady && <span className="text-[#10b981]">· Offline ready</span>}
           </div>
           <h1 className="mx-auto max-w-2xl text-4xl font-extrabold leading-tight sm:text-5xl">
             Detect{" "}
@@ -526,6 +580,11 @@ export default function Home() {
                       <div className="mt-1 text-xs text-[#94a3b8]">
                         Models leaned toward &ldquo;{result.prediction}&rdquo;, but confidence was too
                         close to call reliably.
+                      </div>
+                    )}
+                    {result.offline && (
+                      <div className="mt-2 inline-flex items-center gap-1 rounded-full border border-[#6366f1] bg-[#6366f1]/10 px-3 py-1 text-xs font-semibold text-[#6366f1]">
+                        📴 On-device result — ViT-S/16 only, no face-crop
                       </div>
                     )}
                     {result.demo_mode && (
