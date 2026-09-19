@@ -1,0 +1,3 @@
+# Serve these as real files (Vercel does not fetch Git LFS objects by default).
+models/*.onnx -filter -diff -merge
+ort/*.wasm -filter -diff -merge

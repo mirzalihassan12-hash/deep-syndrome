@@ -2,7 +2,7 @@
 // ONNX Runtime WASM binary (large, stable-path assets) on install, and
 // caches everything else same-origin as it's requested (so a page visited
 // once online keeps working offline on repeat visits).
-const CACHE_NAME = "deepsyndrome-offline-v1";
+const CACHE_NAME = "deepsyndrome-offline-v2";
 const PRECACHE = [
   "/",
   "/models/vit_s16.onnx",
