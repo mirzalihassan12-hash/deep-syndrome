@@ -1,11 +1,13 @@
-// Service worker for offline capability. Precaches the offline ViT model +
+// Service worker for offline capability. Precaches the three offline models +
 // ONNX Runtime WASM binary (large, stable-path assets) on install, and
 // caches everything else same-origin as it's requested (so a page visited
 // once online keeps working offline on repeat visits).
-const CACHE_NAME = "deepsyndrome-offline-v2";
+const CACHE_NAME = "deepsyndrome-offline-v3";
 const PRECACHE = [
   "/",
   "/models/vit_s16.onnx",
+  "/models/resnet50.onnx",
+  "/models/efficientnet_b3.onnx",
   "/ort/ort-wasm-simd-threaded.wasm",
   "/ort/ort-wasm-simd-threaded.mjs",
   "/ort/ort.wasm.min.mjs",
@@ -15,9 +17,10 @@ self.addEventListener("install", (event) => {
   event.waitUntil(
     // add() per file (not addAll): a missing file - e.g. the large model files
     // when they aren't deployed - must not fail the whole service worker install.
-    caches.open(CACHE_NAME).then((cache) =>
-      Promise.all(PRECACHE.map((url) => cache.add(url).catch(() => {})))
-    )
+    // Sequential, not parallel: ~220 MB of models - avoid a memory/bandwidth spike.
+    caches.open(CACHE_NAME).then(async (cache) => {
+      for (const url of PRECACHE) await cache.add(url).catch(() => {});
+    })
   );
   self.skipWaiting();
 });

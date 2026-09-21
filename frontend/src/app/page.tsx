@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Client } from "@gradio/client";
-import { runOfflineViT, preloadOfflineModel } from "@/lib/offlineInference";
+import { runOfflineEnsemble, preloadOfflineModel } from "@/lib/offlineInference";
 
 // Hugging Face Space reference, e.g. "username/space-name" or a full URL.
 const HF_SPACE = process.env.NEXT_PUBLIC_HF_SPACE || "mirzalihassan12/syndrome-model";
@@ -95,12 +95,12 @@ export default function Home() {
       preloadOfflineModel().then((ok) => {
         if (ok) {
           setOfflineReady(true);
-          toast("✅ Offline mode ready — on-device model cached");
+          toast("✅ Offline mode ready — all 3 models cached");
         }
       });
     }, 1500);
 
-    const onOffline = () => toast("📴 Offline — predictions will use the on-device model", true);
+    const onOffline = () => toast("📴 Offline — predictions will run on-device", true);
     const onOnline = () => toast("✅ Back online — using the full 3-model ensemble again");
     window.addEventListener("offline", onOffline);
     window.addEventListener("online", onOnline);
@@ -138,8 +138,8 @@ export default function Home() {
     try {
       let data: PredictResponse;
       if (!navigator.onLine) {
-        toast("📴 Offline — using on-device model (ViT-S/16 only, no face-crop)");
-        data = await runOfflineViT(imageFile);
+        toast("📴 Offline — running the 3 models on-device (no face-crop). First run takes a few seconds…");
+        data = await runOfflineEnsemble(imageFile);
       } else {
         // navigator.onLine only reflects the OS network interface, not actual
         // reachability - it can report "online" even when the HF Space is
@@ -159,8 +159,8 @@ export default function Home() {
           const res = await withTimeout(client.predict("/run_prediction", [imageFile]), 20000);
           [, , data] = res.data as [unknown, unknown, PredictResponse];
         } catch {
-          toast("⚠️ Online model unreachable — using on-device model instead", true);
-          data = await runOfflineViT(imageFile);
+          toast("⚠️ Online model unreachable — running the models on-device instead", true);
+          data = await runOfflineEnsemble(imageFile);
         }
       }
       setResult(data);
@@ -584,7 +584,7 @@ export default function Home() {
                     )}
                     {result.offline && (
                       <div className="mt-2 inline-flex items-center gap-1 rounded-full border border-[#6366f1] bg-[#6366f1]/10 px-3 py-1 text-xs font-semibold text-[#6366f1]">
-                        📴 On-device result — ViT-S/16 only, no face-crop
+                        📴 On-device result — {result.models_used.length}/3 models, no face-crop
                       </div>
                     )}
                     {result.demo_mode && (

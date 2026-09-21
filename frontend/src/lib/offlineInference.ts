@@ -1,13 +1,14 @@
 "use client";
 
-// Offline, in-browser inference using ONNX Runtime Web - runs the ViT-S/16
-// model entirely on-device, no server call. Used when the browser has no
-// network connection (the Hugging Face Space backend is unreachable).
+// Offline, in-browser inference using ONNX Runtime Web - runs the same three
+// models as the server ensemble (ResNet-50, EfficientNet-B3, ViT-S/16) entirely
+// on-device and averages their softmax outputs exactly like the Python
+// ensemble does. Used when the Hugging Face Space is unreachable.
 //
 // Deliberate simplification vs. the server path: no face-detection crop is
 // applied here (the image is resized directly). Porting the Python
 // OpenCV face-detector to JavaScript would risk behaving differently than
-// what the model was actually trained against - documented as a known
+// what the models were actually trained against - documented as a known
 // tradeoff of offline mode, not hidden.
 
 // Loaded lazily (browser only): the WASM-only entry point resolves URLs at
@@ -30,35 +31,58 @@ function getOrt(): Promise<Ort> {
   return ortPromise;
 }
 
-const MODEL_URL = "/models/vit_s16.onnx";
+// Names match the model cards in the UI and the server response.
+export const OFFLINE_MODELS = [
+  { name: "ResNet-50", url: "/models/resnet50.onnx" },
+  { name: "EfficientNet-B3", url: "/models/efficientnet_b3.onnx" },
+  { name: "ViT-S/16", url: "/models/vit_s16.onnx" },
+] as const;
+
 const IMG_SIZE = 224;
 const MEAN = [0.485, 0.456, 0.406];
 const STD = [0.229, 0.224, 0.225];
 
-let sessionPromise: Promise<OrtTypes.InferenceSession> | null = null;
+// One lazily-created session per model. Sessions are created one at a time
+// (not in parallel) to keep peak memory down on phones, and a model that
+// fails to load is skipped rather than breaking the whole ensemble.
+const sessionPromises = new Map<string, Promise<OrtTypes.InferenceSession>>();
 
-function getSession(): Promise<OrtTypes.InferenceSession> {
-  if (!sessionPromise) {
-    sessionPromise = getOrt().then((ort) =>
-      ort.InferenceSession.create(MODEL_URL, { executionProviders: ["wasm"] })
-    );
+function getSession(name: string, url: string): Promise<OrtTypes.InferenceSession> {
+  let p = sessionPromises.get(name);
+  if (!p) {
+    p = getOrt().then((ort) => ort.InferenceSession.create(url, { executionProviders: ["wasm"] }));
+    sessionPromises.set(name, p);
+    p.catch(() => sessionPromises.delete(name)); // allow a retry next time
   }
-  return sessionPromise;
+  return p;
 }
 
-/** Preload the ONNX runtime chunk + model so they are cached for offline use.
- * Resolves true only when the model session is fully ready. */
+/** Make the offline files available without keeping models in memory:
+ * loads the ONNX runtime chunk and waits until every model file is present
+ * in the service-worker cache (fetching it if it isn't yet). Resolves true
+ * only when everything needed for offline use is cached. */
 export async function preloadOfflineModel(): Promise<boolean> {
   try {
-    await getSession();
+    await getOrt();
+    const cache = await caches.open("deepsyndrome-offline-v3");
+    for (const m of OFFLINE_MODELS) {
+      if (await cache.match(m.url)) continue;
+      // Not cached yet: request it through the service worker (which caches
+      // it) and wait until the entry actually appears.
+      fetch(m.url).then((r) => r.body?.cancel()).catch(() => {});
+      const deadline = Date.now() + 10 * 60 * 1000;
+      while (!(await cache.match(m.url))) {
+        if (Date.now() > deadline) return false;
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    }
     return true;
   } catch {
-    sessionPromise = null; // allow a retry on the next attempt
     return false;
   }
 }
 
-async function imageFileToTensor(file: File): Promise<OrtTypes.Tensor> {
+async function imageFileToChw(file: File): Promise<Float32Array> {
   const bitmap = await createImageBitmap(file);
   const canvas = document.createElement("canvas");
   canvas.width = IMG_SIZE;
@@ -68,21 +92,16 @@ async function imageFileToTensor(file: File): Promise<OrtTypes.Tensor> {
   ctx.drawImage(bitmap, 0, 0, IMG_SIZE, IMG_SIZE);
   const { data } = ctx.getImageData(0, 0, IMG_SIZE, IMG_SIZE); // RGBA, HWC
 
-  // Convert to normalized float32 CHW, matching the Python preprocessing
-  // exactly (pixel/255, then (x - MEAN) / STD per channel).
+  // Normalised float32 CHW, matching the Python preprocessing exactly
+  // (pixel/255, then (x - MEAN) / STD per channel).
   const chw = new Float32Array(3 * IMG_SIZE * IMG_SIZE);
   const plane = IMG_SIZE * IMG_SIZE;
   for (let i = 0; i < plane; i++) {
-    const r = data[i * 4] / 255;
-    const g = data[i * 4 + 1] / 255;
-    const b = data[i * 4 + 2] / 255;
-    chw[i] = (r - MEAN[0]) / STD[0];
-    chw[plane + i] = (g - MEAN[1]) / STD[1];
-    chw[2 * plane + i] = (b - MEAN[2]) / STD[2];
+    chw[i] = (data[i * 4] / 255 - MEAN[0]) / STD[0];
+    chw[plane + i] = (data[i * 4 + 1] / 255 - MEAN[1]) / STD[1];
+    chw[2 * plane + i] = (data[i * 4 + 2] / 255 - MEAN[2]) / STD[2];
   }
-
-  const ort = await getOrt();
-  return new ort.Tensor("float32", chw, [1, 3, IMG_SIZE, IMG_SIZE]);
+  return chw;
 }
 
 function softmax(logits: Float32Array): [number, number] {
@@ -104,24 +123,44 @@ export type OfflineResult = {
   offline: true;
 };
 
-export async function runOfflineViT(file: File): Promise<OfflineResult> {
-  const session = await getSession();
-  const tensor = await imageFileToTensor(file);
-  const output = await session.run({ input: tensor });
-  const logits = output.output.data as Float32Array;
-  const [control, downSyndrome] = softmax(logits);
+export async function runOfflineEnsemble(file: File): Promise<OfflineResult> {
+  const ort = await getOrt();
+  const chw = await imageFileToChw(file);
 
+  const perModel: { name: string; probs: [number, number] }[] = [];
+  for (const m of OFFLINE_MODELS) {
+    try {
+      const session = await getSession(m.name, m.url);
+      const tensor = new ort.Tensor("float32", chw.slice(), [1, 3, IMG_SIZE, IMG_SIZE]);
+      const out = await session.run({ input: tensor });
+      perModel.push({ name: m.name, probs: softmax(out.output.data as Float32Array) });
+    } catch {
+      // Skip a model that failed to load/run (e.g. low device memory) and
+      // ensemble whatever did work.
+    }
+  }
+  if (perModel.length === 0) throw new Error("No on-device model could be loaded");
+
+  // Average the per-model softmax outputs, like the Python ensemble.
+  const control = perModel.reduce((s, p) => s + p.probs[0], 0) / perModel.length;
+  const downSyndrome = perModel.reduce((s, p) => s + p.probs[1], 0) / perModel.length;
   const prediction = downSyndrome > control ? "Down Syndrome" : "Control";
-  const confidence = Math.max(control, downSyndrome) * 100;
+
+  const individual: OfflineResult["individual"] = {};
+  for (const p of perModel) {
+    const isDs = p.probs[1] > p.probs[0];
+    individual[p.name] = {
+      prediction: isDs ? "Down Syndrome" : "Control",
+      confidence: Math.max(p.probs[0], p.probs[1]) * 100,
+    };
+  }
 
   return {
     prediction,
-    confidence,
+    confidence: Math.max(control, downSyndrome) * 100,
     probabilities: { control: control * 100, down_syndrome: downSyndrome * 100 },
-    models_used: ["ViT-S/16"],
-    individual: {
-      "ViT-S/16": { prediction, confidence },
-    },
+    models_used: perModel.map((p) => p.name),
+    individual,
     demo_mode: false,
     face_detected: undefined, // no face-crop step in offline mode
     offline: true,
