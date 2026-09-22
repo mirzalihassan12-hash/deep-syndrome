@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Client } from "@gradio/client";
 import { runOfflineEnsemble, preloadOfflineModel } from "@/lib/offlineInference";
+import { useAuth } from "@/lib/useAuth";
+import Header from "@/components/Header";
 
 // Hugging Face Space reference, e.g. "username/space-name" or a full URL.
 const HF_SPACE = process.env.NEXT_PUBLIC_HF_SPACE || "mirzalihassan12/syndrome-model";
@@ -49,13 +51,9 @@ export default function Home() {
   const [autoDetect, setAutoDetect] = useState(false);
   const [lastFile, setLastFile] = useState<File | null>(null);
   const [offlineReady, setOfflineReady] = useState(false);
-  const [doctor, setDoctor] = useState<{ name: string; email: string; role?: string } | null>(null);
+  const { doctor, authChecked, logout } = useAuth();
   const [patients, setPatients] = useState<{ id: string; name: string }[]>([]);
   const [selectedPatientId, setSelectedPatientId] = useState<string>("");
-  const [authChecked, setAuthChecked] = useState(false);
-  const [authMode, setAuthMode] = useState<"login" | "register">("login");
-  const [authForm, setAuthForm] = useState({ name: "", email: "", password: "" });
-  const [authSubmitting, setAuthSubmitting] = useState(false);
   const [savingLabel, setSavingLabel] = useState<"Down Syndrome" | "Control" | null>(null);
   const [savedSampleId, setSavedSampleId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -109,14 +107,6 @@ export default function Home() {
       window.removeEventListener("offline", onOffline);
       window.removeEventListener("online", onOnline);
     };
-  }, []);
-
-  useEffect(() => {
-    fetch("/api/auth/me")
-      .then((r) => r.json())
-      .then((d) => setDoctor(d.doctor))
-      .catch(() => setDoctor(null))
-      .finally(() => setAuthChecked(true));
   }, []);
 
   useEffect(() => {
@@ -183,41 +173,6 @@ export default function Home() {
     }
   };
 
-  const submitAuth = async () => {
-    if (!authForm.email || !authForm.password) return;
-    if (authMode === "register" && !authForm.name) return;
-    setAuthSubmitting(true);
-    try {
-      const endpoint = authMode === "register" ? "/api/auth/register" : "/api/auth/login";
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(authForm),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        setDoctor(data.doctor);
-        setAuthForm({ name: "", email: "", password: "" });
-        toast(`🩺 ${authMode === "register" ? "Registered" : "Logged in"} as Dr. ${data.doctor.name}`);
-      } else {
-        toast(data.error || "Authentication failed.", true);
-      }
-    } catch (e) {
-      toast("Error: " + (e as Error).message, true);
-    } finally {
-      setAuthSubmitting(false);
-    }
-  };
-
-  const logout = async () => {
-    try {
-      await fetch("/api/auth/logout", { method: "POST" });
-    } catch {
-      // ignore network errors on logout - clear local state regardless
-    }
-    setDoctor(null);
-  };
-
   const confirmSample = async (label: "Down Syndrome" | "Control") => {
     if (!lastFile || !result) return;
     setSavingLabel(label);
@@ -236,7 +191,7 @@ export default function Home() {
         setSavedSampleId(data.id);
         toast("✔️ Saved for future training");
       } else {
-        if (res.status === 401) setDoctor(null); // stale/invalid session - re-show login
+        if (res.status === 401) logout(); // stale/invalid session - re-show login
         toast(data.error || "Failed to save sample.", true);
       }
     } catch (e) {
@@ -343,32 +298,7 @@ export default function Home() {
       />
       <div className="relative z-10">
         {/* Header */}
-        <header className="sticky top-0 z-50 flex flex-wrap items-center justify-between gap-3 border-b border-[#2a3550] bg-[#111827]/75 px-6 py-4 backdrop-blur-md sm:px-10">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-[10px] bg-gradient-to-br from-[#6366f1] to-[#8b5cf6] text-xl shadow-[0_0_22px_rgba(99,102,241,.28)]">
-              🧬
-            </div>
-            <div>
-              <div className="bg-gradient-to-r from-[#6366f1] to-[#06b6d4] bg-clip-text text-xl font-extrabold text-transparent">
-                DeepSyndrome
-              </div>
-              <div className="text-[.68rem] uppercase tracking-widest text-[#94a3b8]">
-                AI Diagnostic System
-              </div>
-            </div>
-          </div>
-          <div className="hidden gap-2 sm:flex">
-            <span className="rounded-full border border-[#6366f1] bg-[#6366f1]/10 px-3 py-1 text-xs font-semibold text-[#6366f1]">
-              ResNet-50
-            </span>
-            <span className="rounded-full border border-[#8b5cf6] bg-[#8b5cf6]/10 px-3 py-1 text-xs font-semibold text-[#8b5cf6]">
-              EfficientNet-B3
-            </span>
-            <span className="rounded-full border border-[#06b6d4] bg-[#06b6d4]/10 px-3 py-1 text-xs font-semibold text-[#06b6d4]">
-              ViT-S/16
-            </span>
-          </div>
-        </header>
+        <Header />
 
         {/* Hero */}
         <section className="px-6 pb-10 pt-12 text-center">
@@ -618,81 +548,32 @@ export default function Home() {
 
               {/* Doctor Mode */}
               <div className="mb-5 rounded-2xl border border-[#2a3550] bg-[#111827] p-6">
-                <div className="mb-3 flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-[#94a3b8]">
-                    🩺 Doctor Mode — Confirm Ground Truth
-                  </div>
-                  {doctor && (
-                    <div className="flex items-center gap-3 text-xs">
-                      <Link href="/patients" className="text-[#6366f1] hover:underline">
-                        Patients
-                      </Link>
-                      {doctor.role === "admin" && (
-                        <Link href="/admin" className="text-[#6366f1] hover:underline">
-                          Admin
-                        </Link>
-                      )}
-                      <button onClick={logout} className="text-[#94a3b8] hover:text-[#ef4444]">
-                        Log out
-                      </button>
-                    </div>
-                  )}
+                <div className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-[#94a3b8]">
+                  🩺 Doctor Mode — Confirm Ground Truth
                 </div>
 
                 {!authChecked ? (
                   <p className="text-sm text-[#94a3b8]">Checking session…</p>
                 ) : !doctor ? (
                   <div>
-                    <div className="mb-3 flex gap-4 text-sm">
-                      <button
-                        onClick={() => setAuthMode("login")}
-                        className={authMode === "login" ? "font-bold text-[#6366f1]" : "text-[#94a3b8]"}
-                      >
-                        Log in
-                      </button>
-                      <button
-                        onClick={() => setAuthMode("register")}
-                        className={authMode === "register" ? "font-bold text-[#6366f1]" : "text-[#94a3b8]"}
-                      >
-                        Register
-                      </button>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {authMode === "register" && (
-                        <input
-                          type="text"
-                          value={authForm.name}
-                          onChange={(e) => setAuthForm((f) => ({ ...f, name: e.target.value }))}
-                          placeholder="Full name"
-                          className="min-w-32 flex-1 rounded-lg border border-[#2a3550] bg-black/20 px-3 py-2 text-sm"
-                        />
-                      )}
-                      <input
-                        type="email"
-                        value={authForm.email}
-                        onChange={(e) => setAuthForm((f) => ({ ...f, email: e.target.value }))}
-                        placeholder="Email"
-                        className="min-w-40 flex-1 rounded-lg border border-[#2a3550] bg-black/20 px-3 py-2 text-sm"
-                      />
-                      <input
-                        type="password"
-                        value={authForm.password}
-                        onChange={(e) => setAuthForm((f) => ({ ...f, password: e.target.value }))}
-                        onKeyDown={(e) => e.key === "Enter" && submitAuth()}
-                        placeholder="Password"
-                        className="min-w-32 flex-1 rounded-lg border border-[#2a3550] bg-black/20 px-3 py-2 text-sm"
-                      />
-                      <button
-                        onClick={submitAuth}
-                        disabled={authSubmitting}
-                        className="rounded-lg border border-[#6366f1] px-4 py-2 text-sm font-semibold text-[#6366f1] disabled:opacity-40"
-                      >
-                        {authSubmitting ? "…" : authMode === "register" ? "Create account" : "Log in"}
-                      </button>
-                    </div>
-                    <p className="mt-3 text-xs text-[#94a3b8]">
-                      For clinicians: confirming the real diagnosis helps retrain and improve the model.
+                    <p className="mb-3 text-sm text-[#94a3b8]">
+                      For clinicians: log in to confirm the real diagnosis on this result — it helps
+                      retrain and improve the model.
                     </p>
+                    <div className="flex gap-2">
+                      <Link
+                        href="/login"
+                        className="rounded-lg border border-[#2a3550] px-4 py-2 text-sm font-semibold text-[#94a3b8] hover:text-[#f1f5f9]"
+                      >
+                        Log In
+                      </Link>
+                      <Link
+                        href="/register"
+                        className="rounded-lg bg-gradient-to-br from-[#6366f1] to-[#8b5cf6] px-4 py-2 text-sm font-semibold text-white shadow-[0_4px_14px_rgba(99,102,241,.28)]"
+                      >
+                        Sign Up
+                      </Link>
+                    </div>
                   </div>
                 ) : (
                   <div>

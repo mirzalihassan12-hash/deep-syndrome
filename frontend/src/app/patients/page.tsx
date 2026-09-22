@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import Header from "@/components/Header";
+import { useAuth } from "@/lib/useAuth";
 
 type Patient = {
   id: string;
@@ -20,8 +22,7 @@ type HistoryEntry = {
 };
 
 export default function PatientsPage() {
-  const [doctor, setDoctor] = useState<{ name: string; email: string } | null>(null);
-  const [authChecked, setAuthChecked] = useState(false);
+  const { doctor, authChecked } = useAuth();
   const [patients, setPatients] = useState<Patient[]>([]);
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState({ name: "", dateOfBirth: "", notes: "" });
@@ -29,13 +30,6 @@ export default function PatientsPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
-
-  useEffect(() => {
-    fetch("/api/auth/me")
-      .then((r) => r.json())
-      .then((d) => setDoctor(d.doctor))
-      .finally(() => setAuthChecked(true));
-  }, []);
 
   const loadPatients = async () => {
     setLoading(true);
@@ -89,8 +83,9 @@ export default function PatientsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0a0e1a] px-4 py-10 text-[#f1f5f9]">
-      <div className="mx-auto max-w-3xl">
+    <div className="min-h-screen bg-[#0a0e1a] text-[#f1f5f9]">
+      <Header />
+      <div className="mx-auto max-w-3xl px-4 py-10">
         <div className="mb-6 flex items-center justify-between">
           <h1 className="text-2xl font-extrabold">🧑‍⚕️ Patient Records</h1>
           <Link href="/" className="text-sm text-[#6366f1] hover:underline">
@@ -103,10 +98,14 @@ export default function PatientsPage() {
         ) : !doctor ? (
           <div className="rounded-2xl border border-[#2a3550] bg-[#111827] p-6 text-sm text-[#94a3b8]">
             You need to log in as a doctor first —{" "}
-            <Link href="/" className="text-[#6366f1] hover:underline">
-              go to the screening tool
+            <Link href="/login" className="text-[#6366f1] hover:underline">
+              log in
             </Link>{" "}
-            and use the Doctor Mode panel to log in or register.
+            or{" "}
+            <Link href="/register" className="text-[#6366f1] hover:underline">
+              sign up
+            </Link>
+            .
           </div>
         ) : (
           <>

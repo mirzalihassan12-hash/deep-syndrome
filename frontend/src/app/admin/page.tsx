@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import Header from "@/components/Header";
+import { useAuth } from "@/lib/useAuth";
 
 type Stats = {
   doctorCount: number;
@@ -12,17 +14,9 @@ type Stats = {
 };
 
 export default function AdminPage() {
-  const [doctor, setDoctor] = useState<{ name: string; email: string; role: string } | null>(null);
-  const [authChecked, setAuthChecked] = useState(false);
+  const { doctor, authChecked } = useAuth();
   const [stats, setStats] = useState<Stats | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetch("/api/auth/me")
-      .then((r) => r.json())
-      .then((d) => setDoctor(d.doctor))
-      .finally(() => setAuthChecked(true));
-  }, []);
 
   useEffect(() => {
     if (doctor?.role === "admin") {
@@ -34,8 +28,9 @@ export default function AdminPage() {
   }, [doctor]);
 
   return (
-    <div className="min-h-screen bg-[#0a0e1a] px-4 py-10 text-[#f1f5f9]">
-      <div className="mx-auto max-w-3xl">
+    <div className="min-h-screen bg-[#0a0e1a] text-[#f1f5f9]">
+      <Header />
+      <div className="mx-auto max-w-3xl px-4 py-10">
         <div className="mb-6 flex items-center justify-between">
           <h1 className="text-2xl font-extrabold">🛡️ Admin Dashboard</h1>
           <Link href="/" className="text-sm text-[#6366f1] hover:underline">
@@ -48,8 +43,8 @@ export default function AdminPage() {
         ) : !doctor ? (
           <div className="rounded-2xl border border-[#2a3550] bg-[#111827] p-6 text-sm text-[#94a3b8]">
             You need to log in first —{" "}
-            <Link href="/" className="text-[#6366f1] hover:underline">
-              go to the screening tool
+            <Link href="/login" className="text-[#6366f1] hover:underline">
+              log in
             </Link>
             .
           </div>
