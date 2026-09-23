@@ -2,7 +2,7 @@
 // ONNX Runtime WASM binary (large, stable-path assets) on install, and
 // caches everything else same-origin as it's requested (so a page visited
 // once online keeps working offline on repeat visits).
-const CACHE_NAME = "deepsyndrome-offline-v3";
+const CACHE_NAME = "deepsyndrome-offline-v4";
 const PRECACHE = [
   "/",
   "/models/vit_s16.onnx",
@@ -40,6 +40,7 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return; // never cache the HF Space / cross-origin calls
+  if (url.pathname.startsWith("/api/")) return; // never cache API routes - auth/session/patient data must always be live
 
   event.respondWith(
     caches.match(request).then((cached) => {

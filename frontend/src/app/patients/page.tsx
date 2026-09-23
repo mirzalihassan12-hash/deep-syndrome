@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import Header from "@/components/Header";
 import { useAuth } from "@/lib/useAuth";
@@ -31,14 +31,19 @@ export default function PatientsPage() {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
 
+  const loadRequestId = useRef(0);
+
   const loadPatients = async () => {
+    const requestId = ++loadRequestId.current;
     setLoading(true);
     try {
       const res = await fetch("/api/patients");
       const data = await res.json();
-      if (data.ok) setPatients(data.patients);
+      // Ignore this response if a newer loadPatients() call has since been issued —
+      // otherwise a slow, stale request can resolve after a fresher one and clobber it.
+      if (data.ok && requestId === loadRequestId.current) setPatients(data.patients);
     } finally {
-      setLoading(false);
+      if (requestId === loadRequestId.current) setLoading(false);
     }
   };
 
