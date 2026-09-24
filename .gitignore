@@ -39,9 +39,17 @@ server.log
 Thumbs.db
 desktop.ini
 
-# Claude Code
+# Claude Code / AI agent files
 .claude/
 *.claude
+**/CLAUDE.md
+**/AGENTS.md
+
+# Test run artifacts (test-cases/ ships the tests, not their local run output)
+test-cases/frontend/node_modules/
+test-cases/frontend/test-results/
+test-cases/frontend/playwright-report/
+test-cases/python/.pytest_cache/
 
 # IDE
 .vscode/

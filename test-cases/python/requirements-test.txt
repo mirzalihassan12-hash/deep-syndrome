@@ -1,0 +1,4 @@
+pytest>=7.0
+# Also requires the main project's runtime dependencies to be installed
+# (torch, torchvision, timm, opencv-python, albumentations, numpy, pillow) —
+# see the project's requirements_train.txt / requirements.txt.

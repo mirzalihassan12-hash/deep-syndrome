@@ -1,0 +1,14 @@
+import { defineConfig } from "@playwright/test";
+
+export default defineConfig({
+  testDir: "./tests",
+  timeout: 90_000,
+  fullyParallel: false,
+  workers: 1,
+  reporter: [["list"], ["html", { open: "never" }]],
+  use: {
+    baseURL: process.env.BASE_URL || "http://localhost:3000",
+    screenshot: "on",
+    trace: "retain-on-failure",
+  },
+});
